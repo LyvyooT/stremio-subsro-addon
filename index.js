@@ -1,114 +1,100 @@
-// ================================
-// FULL RENDER-READY STREMIO ADDON
-// ================================
-// Structură completă pentru hosting pe Render
-// Include server Express, extragere SRT, manifest și endpoints
-// ================================
-
-import { addonBuilder } from "stremio-addon-sdk";
-import fetch from "node-fetch";
-import AdmZip from "adm-zip";
-import fs from "fs";
-import path from "path";
-import crypto from "crypto";
-import express from "express";
+const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
+const axios = require("axios");
+const cheerio = require("cheerio");
 
 // ================================
 // MANIFEST
 // ================================
 const manifest = {
-  id: "subsro.addon",
-  version: "1.0.0",
-  name: "Subs.ro Addon",
-  description: "Subtitrări de pe subs.ro pentru Stremio (hostabil pe Render)",
+  id: "community.subsro",
+  version: "2.0.0",
+  name: "SubsRO – Subtitrări Română",
+  description: "Subtitrări românești direct de pe subs.ro (2025)",
+  logo: "https://i.imgur.com/3t8iZ3k.png",
+  background: "https://i.imgur.com/3t8iZ3k.png",
   types: ["movie", "series"],
   resources: ["subtitles"],
   idPrefixes: ["tt"],
-  catalogs: []
+  catalogs: [],
+  behaviorHints: { adult: false, p2p: false }
 };
 
 const builder = new addonBuilder(manifest);
 
 // ================================
-// SRT extraction logic
+// SCRAPING REAL subs.ro
 // ================================
-const TMP_DIR = path.join(process.cwd(), "tmp_subs");
-if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR);
-
-async function fetchAndExtractSrt(downloadUrl) {
-  const id = crypto.randomBytes(8).toString("hex");
-  const zipPath = path.join(TMP_DIR, `${id}.zip`);
-  const srtPath = path.join(TMP_DIR, `${id}.srt`);
-
-  const res = await fetch(downloadUrl);
-  if (!res.ok) return null;
-  const buf = await res.arrayBuffer();
-  fs.writeFileSync(zipPath, Buffer.from(buf));
-
-  const zip = new AdmZip(zipPath);
-  const entry = zip.getEntries().find(e => e.entryName.toLowerCase().endsWith(".srt"));
-  if (!entry) return null;
-
-  fs.writeFileSync(srtPath, zip.readFile(entry));
-  return `/local/${id}.srt`;
-}
-
-// ================================
-// subs.ro API lookup (scraping/endpoint – to be replaced with real API)
-// ================================
-async function getSubs(imdbId) {
-  const apiUrl = `https://subs.ro/api/subs?imdb=${imdbId}`; // placeholder
+async function searchSubsRO(imdbId, season = null, episode = null) {
+  const subtitles = [];
 
   try {
-    const res = await fetch(apiUrl);
-    if (!res.ok) return [];
-
-    const data = await res.json();
-    const out = [];
-
-    for (const sub of data.subtitles) {
-      const localSrt = await fetchAndExtractSrt(sub.download);
-      if (localSrt) {
-        out.push({ id: sub.id, url: localSrt, lang: "ro", type: "srt" });
-      }
+    let query = imdbId;
+    if (season && episode) {
+      query = `${imdbId} sezonul ${season} episodul ${episode}`;
     }
 
-    return out;
-  } catch (e) {
-    console.error("Eroare subs.ro:", e);
-    return [];
+    const searchUrl = `https://subs.ro/?s=${encodeURIComponent(query)}`;
+    const { data } = await axios.get(searchUrl, { timeout: 10000 });
+    const $ = cheerio.load(data);
+
+    for (const el of $('.search-item').toArray()) {
+      const title = $(el).find('h2 a').text().trim();
+      const pageUrl = $(el).find('h2 a').attr('href');
+
+      if (!pageUrl || !title.toLowerCase().includes('română')) continue;
+
+      // Intrăm pe pagina subtitrării să luăm link-ul direct .srt
+      try {
+        const pageRes = await axios.get(pageUrl, { timeout: 8000 });
+        const $page = cheerio.load(pageRes.data);
+        const downloadBtn = $page('a.download-button, a[href$=".srt"], a:contains("Descarcă")');
+
+        let srtUrl = downloadBtn.attr('href');
+        if (srtUrl && !srtUrl.startsWith('http')) {
+          srtUrl = new URL(srtUrl, pageUrl).href;
+        }
+
+        if (srtUrl && srtUrl.includes('.srt')) {
+          subtitles.push({
+            lang: "ron",
+            id: srtUrl,
+            url: srtUrl
+          });
+        }
+      } catch (e) {
+        console.log("Eroare pagină individuală:", e.message);
+      }
+    }
+  } catch (err) {
+    console.error("Eroare căutare subs.ro:", err.message);
   }
+
+  return subtitles;
 }
 
 // ================================
-// Stremio handler
+// STREMIO HANDLER
 // ================================
-builder.defineSubtitlesHandler(async ({ id }) => {
-  const imdb = id.split(":")[0];
-  const subs = await getSubs(imdb);
-  return { subtitles: subs };
+builder.defineSubtitlesHandler(async (args) => {
+  const { type, id } = args;
+  const imdbId = id.split(":")[0];
+
+  let season, episode;
+  if (type === "series" && id.includes(":")) {
+    const parts = id.split(":");
+    season = parts[1];
+    episode = parts[2];
+  }
+
+  const subtitles = await searchSubsRO(imdbId, season, episode);
+
+  return { subtitles };
 });
 
 // ================================
-// EXPRESS SERVER FOR RENDER
+// SERVER RENDER
 // ================================
-const app = express();
-
-// Static files (.srt)
-app.use("/local", express.static(TMP_DIR));
-
-// Manifest
-app.get("/manifest.json", (req, res) => {
-  res.json(builder.getManifest());
-});
-
-// Subtitles endpoint
-app.get("/subtitles/:type/:id.json", async (req, res) => {
-  const { id } = req.params;
-  const { subtitles } = await builder.getInterface().subtitles({ id });
-  res.json({ subtitles });
-});
-
-// Start server
-const PORT = process.env.PORT || 7000;
-app.listen(PORT, () => console.log(`Addon subs.ro rulează pe portul ${PORT}`));
+const interfaceHandler = builder.getInterface();
+module.exports = (req, res) => {
+  serveHTTP(interfaceHandler, { req, res });
+};
