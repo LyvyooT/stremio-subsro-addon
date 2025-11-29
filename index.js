@@ -1,0 +1,153 @@
+const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
+const fetch = require('node-fetch');
+const cheerio = require('cheerio');
+
+// Configurare manifest addon
+const manifest = {
+    id: 'ro.subs.stremio',
+    version: '1.0.0',
+    name: 'Subs.ro Subtitles',
+    description: 'Titrări românești automate de pe Subs.ro pentru Stremio',
+    resources: ['subtitles'],
+    types: ['movie', 'series'],
+    catalogs: [],
+    idPrefixes: ['tt'],
+    background: 'https://i.imgur.com/zMJjY8a.jpg',
+    logo: 'https://i.imgur.com/44rx5Xv.png'
+};
+
+const builder = new addonBuilder(manifest);
+
+// Funcție pentru căutare titrări pe subs.ro
+async function searchSubsRo(title, year, season, episode) {
+    try {
+        let searchQuery = title;
+        
+        // Construiește query-ul de căutare
+        if (season && episode) {
+            searchQuery = `${title} S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+        } else if (year) {
+            searchQuery = `${title} ${year}`;
+        }
+
+        const searchUrl = `https://www.subs.ro/cautare.php?c=${encodeURIComponent(searchQuery)}`;
+        
+        const response = await fetch(searchUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        });
+        
+        const html = await response.text();
+        const $ = cheerio.load(html);
+        
+        const subtitles = [];
+        
+        // Parse rezultatele căutării
+        $('.rezultat').each((i, elem) => {
+            const $elem = $(elem);
+            const link = $elem.find('a').attr('href');
+            const titleText = $elem.find('.titlu').text().trim();
+            const downloads = $elem.find('.downloads').text().trim();
+            
+            if (link) {
+                subtitles.push({
+                    id: `subsro:${link}`,
+                    url: `https://www.subs.ro${link}`,
+                    lang: 'ron', // Cod ISO 639-2 pentru română
+                    label: titleText || 'Subtitrare Română',
+                    downloads: downloads || '0'
+                });
+            }
+        });
+        
+        return subtitles;
+        
+    } catch (error) {
+        console.error('Eroare căutare subs.ro:', error);
+        return [];
+    }
+}
+
+// Funcție pentru extragerea link-ului de download
+async function getDownloadLink(subsUrl) {
+    try {
+        const response = await fetch(subsUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        });
+        
+        const html = await response.text();
+        const $ = cheerio.load(html);
+        
+        // Găsește link-ul de download
+        const downloadLink = $('.buton_download').attr('href');
+        
+        if (downloadLink) {
+            return `https://www.subs.ro${downloadLink}`;
+        }
+        
+        return null;
+        
+    } catch (error) {
+        console.error('Eroare extragere link download:', error);
+        return null;
+    }
+}
+
+// Handler pentru cereri de subtitles
+builder.defineSubtitlesHandler(async (args) => {
+    console.log('Cerere subtitles pentru:', args);
+    
+    const { type, id } = args;
+    
+    // Extrage informații din ID (format: tt1234567)
+    const imdbId = id.split(':')[0];
+    
+    // Extrage sezon și episod dacă există
+    const season = args.season;
+    const episode = args.episode;
+    
+    try {
+        // În producție, ar trebui să obții titlul filmului/serialului din IMDB
+        // Pentru simplificare, folosim un placeholder
+        let title = 'placeholder'; // Aici ar trebui să faci un fetch la IMDB API
+        
+        // Caută titrări
+        const results = await searchSubsRo(title, null, season, episode);
+        
+        // Obține link-urile de download
+        const subtitles = await Promise.all(
+            results.slice(0, 5).map(async (sub) => {
+                const downloadUrl = await getDownloadLink(sub.url);
+                return {
+                    id: sub.id,
+                    url: downloadUrl || sub.url,
+                    lang: sub.lang,
+                    label: `🇷🇴 ${sub.label}`
+                };
+            })
+        );
+        
+        return Promise.resolve({ subtitles: subtitles.filter(s => s.url) });
+        
+    } catch (error) {
+        console.error('Eroare handler subtitles:', error);
+        return Promise.resolve({ subtitles: [] });
+    }
+});
+
+// Pornește serverul
+const port = process.env.PORT || 7000;
+
+serveHTTP(builder.getInterface(), {
+    port: port,
+    cache: 3600 // Cache rezultatele pentru 1 oră
+});
+
+console.log(`✅ Addon Subs.ro pornit pe portul ${port}`);
+console.log(`📝 Manifest: http://localhost:${port}/manifest.json`);
+
+// Export pentru a putea fi importat
+module.exports = builder.getInterface();
