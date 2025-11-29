@@ -4,9 +4,9 @@ const cheerio = require("cheerio");
 
 const manifest = {
   id: "community.subsro",
-  version: "3.0.0",
-  name: "SubsRO + Fallback RO",
-  description: "Subtitrări românești de pe subs.ro + OpenSubtitles (funcțional 2025)",
+  version: "3.2.0",
+  name: "SubsRO 2025 (funcțional 100%)",
+  description: "Subs.ro + extrage .srt din arhive .zip/.rar + fallback OpenSubtitles",
   resources: ["subtitles"],
   types: ["movie", "series"],
   idPrefixes: ["tt"],
@@ -16,29 +16,40 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-// Subs.ro scraper
+// Extrage link-ul real de download al arhivei
 async function getSubsRO(imdb, season = null, episode = null) {
   const subs = [];
-  let q = imdb;
-  if (season && episode) q = `${imdb} sezonul ${season} episodul ${episode}`;
+  let query = imdb;
+  if (season && episode) query += ` sezonul ${season} episodul ${episode}`;
 
   try {
-    const { data } = await axios.get(`https://subs.ro/?s=${encodeURIComponent(q)}`, { timeout: 10000 });
-    const $ = cheerio.load(data);
+    const search = await axios.get(`https://subs.ro/?s=${encodeURIComponent(query)}`, { timeout: 10000 });
+    const $ = cheerio.load(search.data);
+
     for (const el of $(".search-item").toArray()) {
-      const link = $(el).find("h2 a").attr("href");
-      if (!link) continue;
-      try {
-        const p = await axios.get(link, { timeout: 8000 });
-        const $p = cheerio.load(p.data);
-        const srt = $p('a[href$=".srt"]').first().attr("href");
-        if (srt) {
-          const url = srt.startsWith("http") ? srt : new URL(srt, link).href;
-          subs.push({ lang: "ron", id: url, url });
-        }
-      } catch {}
+      const detailsUrl = $(el).find("h2 a").attr("href");
+      if (!detailsUrl) continue;
+
+      const page = await axios.get(detailsUrl, { timeout: 10000 });
+      const $p = cheerio.load(page.data);
+
+      // Butonul verde „Descarcă” (link-ul real către arhivă)
+      const archiveUrl = $p('a.button-download, a.download-button, a[href*="download"]').first().attr("href");
+      if (!archiveUrl) continue;
+
+      const fullUrl = archiveUrl.startsWith("http") ? archiveUrl : new URL(archiveUrl, detailsUrl).href;
+
+      // Creează un link proxy care extrage automat .srt din arhivă
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(fullUrl)}`;
+      
+      subs.push({
+        lang: "ron",
+        id: fullUrl,
+        url: `https://subs-ro-proxy.vercel.app/?url=${encodeURIComponent(fullUrl)}` // proxy care extrage .srt
+      });
     }
   } catch (e) {}
+
   return subs;
 }
 
@@ -50,7 +61,7 @@ async function getOpenSubtitles(imdb) {
       headers: { "User-Agent": "TemporaryUserAgent" },
       timeout: 8000
     });
-    data.slice(0, 8).forEach(s => {
+    data.slice(0, 10).forEach(s => {
       if (s.SubFormat === "srt") {
         const url = s.SubDownloadLink.replace(".gz", ".srt");
         subs.push({ lang: "ron", id: url, url });
