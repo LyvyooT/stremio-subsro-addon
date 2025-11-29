@@ -1,6 +1,6 @@
 {
   "name": "stremio-subsro",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Subtitrări românești de pe subs.ro pentru Stremio",
   "main": "index.js",
   "scripts": {
@@ -8,8 +8,7 @@
   },
   "dependencies": {
     "stremio-addon-sdk": "^1.6.10",
-    "axios": "^1.7.7",
-    "cheerio": "^1.0.0-rc.12"
+    "axios": "^1.7.7"
   },
   "keywords": ["stremio", "addon", "subtitrari", "subs.ro", "romana"],
   "author": "Tu",
