@@ -1,0 +1,13 @@
+{
+  "id": "community.subsro",
+  "version": "3.0.0",
+  "name": "SubsRO + Fallback RO",
+  "description": "Subtitrări românești de pe subs.ro + OpenSubtitles (funcțional 2025)",
+  "resources": ["subtitles"],
+  "types": ["movie", "series"],
+  "idPrefixes": ["tt"],
+  "catalogs": [],
+  "logo": "https://i.imgur.com/3t8iZ3k.png",
+  "background": "https://i.imgur.com/3t8iZ3k.png",
+  "behaviorHints": { "adult": false, "p2p": false }
+}
