@@ -1,0 +1,13 @@
+{
+  "id": "community.subtitrari-noi",
+  "version": "1.0.0",
+  "name": "Subtitrari-Noi.ro",
+  "description": "Subtitrări românești de pe subtitrari-noi.ro (2025)",
+  "logo": "https://i.imgur.com/3t8iZ3k.png",
+  "background": "https://i.imgur.com/3t8iZ3k.png",
+  "resources": ["subtitles"],
+  "types": ["movie", "series"],
+  "idPrefixes": ["tt"],
+  "catalogs": [],
+  "behaviorHints": { "adult": false, "p2p": false }
+}
