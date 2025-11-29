@@ -1,16 +1,13 @@
 {
-  "id": "community.subsro",
-  "version": "2.0.0",
-  "name": "SubsRO – Subtitrări Română",
-  "description": "Subtitrări românești direct de pe subs.ro (2025)",
-  "logo": "https://i.imgur.com/3t8iZ3k.png",
-  "background": "https://i.imgur.com/3t8iZ3k.png",
+  "id": "community.stremio-subsro-addon",
+  "version": "1.0.0",
+  "name": "Subs.RO Subtitles",
+  "description": "Addon Stremio care descarcă și livrează subtitrări .srt de pe subs.ro",
   "types": ["movie", "series"],
-  "resources": ["subtitles"],
-  "idPrefixes": ["tt"],
+  "logo": "https://subs.ro/assets/img/logo.png",
+  "background": "",
+  "contactEmail": "none",
   "catalogs": [],
-  "behaviorHints": {
-    "adult": false,
-    "p2p": false
-  }
+  "resources": ["subtitles"],
+  "idPrefixes": ["tt"]
 }
