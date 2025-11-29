@@ -1,88 +1,87 @@
-const { addonBuilder } = require("stremio-addon-sdk");
-const fetch = require("node-fetch");
-const AdmZip = require("adm-zip");
-const express = require("express");
+const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
+const axios = require("axios");
+const cheerio = require("cheerio");
 
-const manifest = require("./manifest.json");
-const addon = new addonBuilder(manifest);
+// ======================== MANIFEST ========================
+const manifest = {
+  id: "community.subsro",
+  version: "2.5.0",
+  name: "SubsRO + OpenSubtitles RO",
+  description: "Subtitrări românești de pe subs.ro + fallback OpenSubtitles (2025)",
+  resources: ["subtitles"],
+  types: ["movie", "series"],
+  idPrefixes: ["tt"],
+  catalogs: [],
+  behaviorHints: { adult: false, p2p: false }
+};
 
-function subsRoUrl(titleId) {
-    return `https://subs.ro/subtitrare/descarca/${titleId}`;
+const builder = new addonBuilder(manifest);
+
+// ======================== HELPER ========================
+async function searchSubsRO(imdbId, season = null, episode = null) {
+  const subs = [];
+  let query = imdbId;
+  if (season && episode) query = `${imdbId} sezonul ${season} episodul ${episode}`;
+
+  try {
+    const { data } = await axios.get(`https://subs.ro/?s=${encodeURIComponent(query)}`, {
+      timeout: 9000,
+      headers: { "User-Agent": "Mozilla/5.0" }
+    });
+    const $ = cheerio.load(data);
+
+    for (const el of $(".search-item").toArray()) {
+      const title = $(el).find("h2 a").text().trim();
+      const pageUrl = $(el).find("h2 a").attr("href");
+      if (!pageUrl || !title.toLowerCase().includes("română")) continue;
+
+      const page = await axios.get(pageUrl, { timeout: 8000 });
+      const $p = cheerio.load(page.data);
+      let srt = $p('a.download-button, a[href$=".srt"]').first().attr("href");
+
+      if (srt && !srt.startsWith("http")) srt = new URL(srt, pageUrl).href;
+      if (srt && srt.includes(".srt")) {
+        subs.push({ lang: "ron", id: srt, url: srt });
+      }
+    }
+  } catch (e) {
+    console.log("subs.ro error:", e.message);
+  }
+  return subs;
 }
 
-async function downloadAndExtractSrt(url) {
-    try {
-        const response = await fetch(url);
-        if (!response.ok) throw new Error("Failed to download ZIP");
-
-        const buffer = await response.buffer();
-        const zip = new AdmZip(buffer);
-        const entries = zip.getEntries();
-
-        for (let e of entries) {
-            if (e.entryName.toLowerCase().endsWith(".srt")) {
-                return zip.readAsText(e);
-            }
-        }
-
-        throw new Error("No .srt file found inside ZIP");
-    } catch (err) {
-        console.error("Error extracting SRT:", err);
-        return null;
-    }
+// Fallback OpenSubtitles (fără API key – folosește endpoint public)
+async function fallbackOpenSubtitles(imdbId, season = null, episode = null) {
+  const subs = [];
+  try {
+    const query = season ? `${imdbId} S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}` : imdbId;
+    const url = `https://rest.opensubtitles.org/search/imdbid-${imdbId}/sublanguageid-ron`;
+    const { data } = await axios.get(url, {
+      headers: { "User-Agent": "TemporaryUserAgent", "X-User-Agent": "TemporaryUserAgent" },
+      timeout: 8000
+    });
+    data.slice(0, 10).forEach(s => {
+      if (s.SubFormat === "srt") {
+        subs.push({ lang: "ron", id: s.SubDownloadLink.replace(".gz", ".srt"), url: s.SubDownloadLink.replace(".gz", ".srt") });
+      }
+    });
+  } catch (e) { }
+  return subs;
 }
 
-addon.defineSubtitlesHandler(async ({ type, id }) => {
-    console.log("Request subtitles for:", type, id);
+// ======================== HANDLER ========================
+builder.defineSubtitlesHandler(async (args) => {
+  const imdbId = args.id.split(":")[0];
+  const season = args.type === "series" && args.id.includes(":") ? args.id.split(":")[1] : null;
+  const episode = args.type === "series" && args.id.includes(":") ? args.id.split(":")[2] : null;
 
-    // ID trebuie să fie de forma:  subsro:xxxxxx
-    if (!id.startsWith("subsro:")) {
-        return { subtitles: [] };
-    }
+  let subtitles = await searchSubsRO(imdbId, season, episode);
+  if (subtitles.length === 0) {
+    subtitles = await fallbackOpenSubtitles(imdbId, season, episode);
+  }
 
-    const titleId = id.replace("subsro:", "");
-
-    const url = subsRoUrl(titleId);
-    const srtText = await downloadAndExtractSrt(url);
-
-    if (!srtText) {
-        return { subtitles: [] };
-    }
-
-    return {
-        subtitles: [
-            {
-                id: "subsro-" + titleId,
-                url: `https://stremio-subsro-addon.onrender.com/srt/${titleId}`,
-                lang: "ro",
-                title: "Subs.RO"
-            }
-        ]
-    };
+  return { subtitles };
 });
 
-// Server Express pentru a servi fișierul SRT real
-const app = express();
-
-app.get("/srt/:id", async (req, res) => {
-    const titleId = req.params.id;
-    const url = subsRoUrl(titleId);
-    const srtText = await downloadAndExtractSrt(url);
-
-    if (!srtText) {
-        return res.status(404).send("SRT not found");
-    }
-
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.send(srtText);
-});
-
-app.get("/manifest.json", (req, res) => {
-    res.send(manifest);
-});
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-    console.log("Subs.RO Addon running on port " + PORT);
-});
+// ======================== SERVER ========================
+module.exports = (req, res) => serveHTTP(builder.getInterface(), { req, res });
