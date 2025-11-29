@@ -2,12 +2,10 @@
   "id": "community.stremio-subsro-addon",
   "version": "1.0.0",
   "name": "Subs.RO Subtitles",
-  "description": "Addon Stremio care descarcă și livrează subtitrări .srt de pe subs.ro",
-  "types": ["movie", "series"],
+  "description": "Addon Stremio care descarcă, extrage și livrează subtitrări .srt de pe subs.ro",
   "logo": "https://subs.ro/assets/img/logo.png",
-  "background": "",
-  "contactEmail": "none",
-  "catalogs": [],
   "resources": ["subtitles"],
-  "idPrefixes": ["tt"]
+  "types": ["movie", "series"],
+  "idPrefixes": ["subsro"],
+  "catalogs": []
 }
