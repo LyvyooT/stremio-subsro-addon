@@ -1,0 +1,9 @@
+{
+  "name": "stremio-subsro-addon",
+  "version": "1.0.0",
+  "dependencies": {
+    "stremio-addon-sdk": "^1.6.8",
+    "node-fetch": "^2.6.7",
+    "cheerio": "^1.0.0-rc.12"
+  }
+}
